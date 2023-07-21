@@ -18,91 +18,64 @@ IO.puts("making #{drinks_count} drinks")
   insert into drinks(name) select name from generate_drinks;
   """)
 
+{:ok, sup} = Task.Supervisor.start_link()
+concurrency = [1, 2, 4, 8, 16, 250]
+
+IO.puts("\n\n# cpu benchmarks\n\n")
+
 queries = [
-  # "select 1",
+  "select 1",
   # "select * from drinks",
   # "select * from drinks limit 1000",
-  # "select count(*) from drinks",
+  "select count(*) from drinks"
+]
+
+cases =
+  Map.new(concurrency, fn concurrency ->
+    {"read_query max_concurrency=#{concurrency}",
+     fn query ->
+       Task.Supervisor.async_stream_nolink(
+         sup,
+         1..1000,
+         fn _ -> Exqlite.RWConnection.read_query(conn, query) end,
+         ordered: false,
+         max_concurrency: concurrency,
+         timeout: :timer.seconds(30)
+       )
+       |> Stream.run()
+     end}
+  end)
+
+Benchee.run(
+  cases,
+  inputs: Map.new(queries, fn q -> {q, q} end)
+)
+
+IO.puts("\n\n# io benchmarks\n\n")
+
+queries = [
   "select * from drinks where rowid >= ? and rowid < ?"
 ]
 
-{:ok, sup} = Task.Supervisor.start_link()
+cases =
+  Map.new(concurrency, fn concurrency ->
+    {"read_query max_concurrency=#{concurrency}",
+     fn query ->
+       Task.Supervisor.async_stream_nolink(
+         sup,
+         1..floor(drinks_count / 50),
+         fn i ->
+           Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
+         end,
+         ordered: false,
+         max_concurrency: concurrency,
+         timeout: :timer.seconds(30)
+       )
+       |> Stream.run()
+     end}
+  end)
 
 Benchee.run(
-  %{
-    "read_query async_stream=1" => fn query ->
-      Task.Supervisor.async_stream_nolink(
-        sup,
-        1..floor(drinks_count / 50),
-        fn i ->
-          Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
-        end,
-        ordered: false,
-        max_concurrency: 1
-      )
-      |> Stream.run()
-    end,
-    "read_query async_stream=2" => fn query ->
-      Task.Supervisor.async_stream_nolink(
-        sup,
-        1..floor(drinks_count / 50),
-        fn i ->
-          Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
-        end,
-        ordered: false,
-        max_concurrency: 2
-      )
-      |> Stream.run()
-    end,
-    "read_query async_stream=4" => fn query ->
-      Task.Supervisor.async_stream_nolink(
-        sup,
-        1..floor(drinks_count / 50),
-        fn i ->
-          Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
-        end,
-        ordered: false,
-        max_concurrency: 4
-      )
-      |> Stream.run()
-    end,
-    "read_query async_stream=8" => fn query ->
-      Task.Supervisor.async_stream_nolink(
-        sup,
-        1..floor(drinks_count / 50),
-        fn i ->
-          Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
-        end,
-        ordered: false,
-        max_concurrency: 8
-      )
-      |> Stream.run()
-    end,
-    "read_query async_stream=16" => fn query ->
-      Task.Supervisor.async_stream_nolink(
-        sup,
-        1..floor(drinks_count / 50),
-        fn i ->
-          Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
-        end,
-        ordered: false,
-        max_concurrency: 16
-      )
-      |> Stream.run()
-    end,
-    "read_query async_stream=250" => fn query ->
-      Task.Supervisor.async_stream_nolink(
-        sup,
-        1..floor(drinks_count / 50),
-        fn i ->
-          Exqlite.RWConnection.read_query(conn, query, [(i - 1) * 50, i * 50])
-        end,
-        ordered: false,
-        max_concurrency: 250,
-        timeout: :infinity
-      )
-      |> Stream.run()
-    end
-  },
+  cases,
   inputs: Map.new(queries, fn q -> {q, q} end)
 )
