@@ -1,10 +1,10 @@
 defmodule Exqlite.ErrorTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   alias Exqlite.Error
 
   describe "message/1" do
     test "with :statement" do
-      assert "a\nb" == Exception.message(%Error{message: "a", statement: "b"})
+      assert "a: b" == Exception.message(%Error{message: "a", statement: "b"})
     end
 
     test "without :statement" do

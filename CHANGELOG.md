@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unlreleased
+- removed: `db_connection`. It's just a NIF now.
 
 ## v0.15.0
 - added: `set_update_hook`.
