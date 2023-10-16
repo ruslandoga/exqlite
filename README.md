@@ -41,15 +41,6 @@ end
 
 
 ## Configuration
-
-### Runtime Configuration
-
-```elixir
-config :exqlite, default_chunk_size: 100
-```
-
-* `default_chunk_size` - The chunk size that is used when multi-stepping when
-  not specifying the chunk size explicitly.
   
 ### Compile-time Configuration
 
@@ -114,47 +105,70 @@ export EXQLITE_SYSTEM_CFLAGS=-I/usr/local/include/sqlcipher
 export EXQLITE_SYSTEM_LDFLAGS=-L/usr/local/lib -lsqlcipher
 ```
 
-Once you have `exqlite` configured, you can use the `:key` option in the database config to enable encryption:
+Once you have `exqlite` build configured, you can use the `key` pragma to enable encryption:
 
 ```elixir
-config :exqlite, key: "super-secret'
+{:ok, conn} = Exqlite.open("sqlcipher.db")
+:ok = Exqlite.execute(conn, "pragma key='test123'")
 ```
 
 ## Usage
 
-The `Exqlite.Sqlite3` module usage is fairly straight forward.
+The `Exqlite` module usage is fairly straight forward.
 
 ```elixir
 # We'll just keep it in memory right now
-{:ok, conn} = Exqlite.Sqlite3.open(":memory:")
+{:ok, conn} = Exqlite.open(":memory:")
 
 # Create the table
-:ok = Exqlite.Sqlite3.execute(conn, "create table test (id integer primary key, stuff text)")
+:ok = Exqlite.execute(conn, "create table test (id integer primary key, stuff text) strict")
 
 # Prepare a statement
-{:ok, statement} = Exqlite.Sqlite3.prepare(conn, "insert into test (stuff) values (?1)")
-:ok = Exqlite.Sqlite3.bind(conn, statement, ["Hello world"])
+{:ok, insert_stmt} = Exqlite.prepare(conn, "insert into test (stuff) values (?1)")
+:ok = Exqlite.bind(conn, insert_stmt, ["Hello world"])
 
 # Step is used to run statements
-:done = Exqlite.Sqlite3.step(conn, statement)
+:done = Exqlite.step(conn, insert_stmt)
 
 # Prepare a select statement
-{:ok, statement} = Exqlite.Sqlite3.prepare(conn, "select id, stuff from test")
+{:ok, select_stmt} = Exqlite.prepare(conn, "select id, stuff from test")
 
 # Get the results
-{:row, [1, "Hello world"]} = Exqlite.Sqlite3.step(conn, statement)
+{:row, [1, "Hello world"]} = Exqlite.step(conn, select_stmt)
 
 # No more results
-:done = Exqlite.Sqlite3.step(conn, statement)
+:done = Exqlite.step(conn, select_stmt)
 
-# Release the statement.
+# Release the statements.
 #
 # It is recommended you release the statement after using it to reclaim the memory
 # asap, instead of letting the garbage collector eventually releasing the statement.
 #
 # If you are operating at a high load issuing thousands of statements, it would be
 # possible to run out of memory or cause a lot of pressure on memory.
-:ok = Exqlite.Sqlite3.release(conn, statement)
+:ok = Exqlite.release(conn, insert_stmt)
+:ok = Exqlite.release(conn, select_stmt)
+```
+
+`Exqlite` also has a more high-level API available for reads and writes
+
+```elixir
+{:ok, db} = Exqlite.open(":memory:")
+:ok = Exqlite.execute(conn, "create table test (id integer primary key, stuff text) strict")
+
+:ok =
+  Exqlite.prepare_insert_all(
+    conn,
+    "insert into test(stuff) values (?)",
+    _rows = [["Hello world"], ["Banana"], ["Unemployment"]]
+  )
+
+{:ok, [[1, "Hello world"], [2, "Banana"]]} =
+  Exqlite.prepare_fetch_all(
+    conn,
+    "select * from test where id < ?",
+    _params = [3]
+  )
 ```
 
 ### Using SQLite3 native extensions
@@ -163,23 +177,23 @@ Exqlite supports loading [run-time loadable SQLite3 extensions](https://www.sqli
 A selection of precompiled extensions for popular CPU types / architectures is available by installing the [ExSqlean](https://github.com/mindreframer/ex_sqlean) package. This package wraps [SQLean: all the missing SQLite functions](https://github.com/nalgeon/sqlean).
 
 ```elixir
-alias Exqlite.Basic
-{:ok, conn} = Basic.open("db.sqlite3")
-:ok = Basic.enable_load_extension(conn)
+{:ok, db} = Exqlite.open(":memory:")
+:ok = Exqlite.enable_load_extension(conn)
 
 # load the regexp extension - https://github.com/nalgeon/sqlean/blob/main/docs/re.md
-Basic.load_extension(conn, ExSqlean.path_for("re"))
+{:ok, _rows} = Exqlite.prepare_fetch_all(conn, "select load_extension(?)", [ExSqlean.path_for("re")])
 
 # run some queries to test the new `regexp_like` function
-{:ok, [[1]], ["value"]} = Basic.exec(conn, "select regexp_like('the year is 2021', ?) as value", ["2021"]) |> Basic.rows()
-{:ok, [[0]], ["value"]} = Basic.exec(conn, "select regexp_like('the year is 2021', ?) as value", ["2020"]) |> Basic.rows()
+{:ok, [[1]], ["value"]} = Exqlite.prepare_fetch_all(conn, "select regexp_like('the year is 2021', ?) as value", ["2021"])
+{:ok, [[0]], ["value"]} = Exqlite.prepare_fetch_all(conn, "select regexp_like('the year is 2021', ?) as value", ["2020"])
 
 # prevent loading further extensions
-:ok = Basic.disable_load_extension(conn)
-{:error, %Exqlite.Error{message: "not authorized"}, _} = Basic.load_extension(conn, ExSqlean.path_for("re"))
+:ok = Exqlite.disable_load_extension(conn)
+{:error, %Exqlite.Error{code: 1, codename: "SQL logic error", message: "not authorized"}} =
+  Exqlite.prepare_fetch_all(conn, "select load_extension(?)", [ExSqlean.path_for("re")])
 
 # close connection
-Basic.close(conn)
+:ok = Exqlite.close(conn)
 ```
 
 ## Why SQLite3
