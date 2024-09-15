@@ -14,10 +14,10 @@ defmodule Exqlite.Sqlite3 do
 
   alias Exqlite.Flags
   alias Exqlite.Sqlite3NIF
+  alias Exqlite.Error
 
   @type db() :: reference()
   @type statement() :: reference()
-  @type reason() :: atom() | String.t()
   @type row() :: list()
   @type open_mode :: :readwrite | :readonly | :nomutex
   @type open_opt :: {:mode, :readwrite | :readonly | [open_mode()]}
@@ -35,10 +35,10 @@ defmodule Exqlite.Sqlite3 do
       the database if it doesn't already exist. Defaults to `:readwrite`.
       Note: [:readwrite, :nomutex] is not recommended.
   """
-  @spec open(String.t(), [open_opt()]) :: {:ok, db()} | {:error, reason()}
+  @spec open(String.t(), [open_opt()]) :: {:ok, db()} | {:error, Error.t()}
   def open(path, opts \\ []) do
     mode = Keyword.get(opts, :mode, :readwrite)
-    Sqlite3NIF.open(path, flags_from_mode(mode))
+    wrap_err(Sqlite3NIF.open(path, flags_from_mode(mode)))
   end
 
   defp flags_from_mode(:nomutex) do
@@ -80,22 +80,22 @@ defmodule Exqlite.Sqlite3 do
   @doc """
   Closes the database and releases any underlying resources.
   """
-  @spec close(db() | nil) :: :ok | {:error, reason()}
+  @spec close(db() | nil) :: :ok | {:error, Error.t()}
   def close(nil), do: :ok
-  def close(conn), do: Sqlite3NIF.close(conn)
+  def close(conn), do: wrap_err(Sqlite3NIF.close(conn))
 
   @doc """
   Interrupt a long-running query.
   """
-  @spec interrupt(db() | nil) :: :ok | {:error, reason()}
+  @spec interrupt(db() | nil) :: :ok | {:error, Error.t()}
   def interrupt(nil), do: :ok
-  def interrupt(conn), do: Sqlite3NIF.interrupt(conn)
+  def interrupt(conn), do: wrap_err(Sqlite3NIF.interrupt(conn))
 
   @doc """
   Executes an sql script. Multiple stanzas can be passed at once.
   """
-  @spec execute(db(), String.t()) :: :ok | {:error, reason()}
-  def execute(conn, sql), do: Sqlite3NIF.execute(conn, sql)
+  @spec execute(db(), String.t()) :: :ok | {:error, Error.t()}
+  def execute(conn, sql), do: wrap_err(Sqlite3NIF.execute(conn, sql))
 
   @doc """
   Get the number of changes recently.
@@ -104,42 +104,42 @@ defmodule Exqlite.Sqlite3 do
 
   See: https://sqlite.org/c3ref/changes.html
   """
-  @spec changes(db()) :: {:ok, integer()} | {:error, reason()}
-  def changes(conn), do: Sqlite3NIF.changes(conn)
+  @spec changes(db()) :: {:ok, integer()} | {:error, Error.t()}
+  def changes(conn), do: wrap_err(Sqlite3NIF.changes(conn))
 
-  @spec prepare(db(), String.t()) :: {:ok, statement()} | {:error, reason()}
-  def prepare(conn, sql), do: Sqlite3NIF.prepare(conn, sql)
+  @spec prepare(db(), String.t()) :: {:ok, statement()} | {:error, Error.t()}
+  def prepare(conn, sql), do: wrap_err(Sqlite3NIF.prepare(conn, sql))
 
-  @spec bind(db(), statement(), nil) :: :ok | {:error, reason()}
+  @spec bind(db(), statement(), nil) :: :ok | {:error, Error.t()}
   def bind(conn, statement, nil), do: bind(conn, statement, [])
 
-  @spec bind(db(), statement(), list()) :: :ok | {:error, reason()}
+  @spec bind(db(), statement(), list()) :: :ok | {:error, Error.t()}
   def bind(conn, statement, args) do
-    Sqlite3NIF.bind(conn, statement, Enum.map(args, &convert/1))
+    wrap_err(Sqlite3NIF.bind(conn, statement, Enum.map(args, &convert/1)))
   end
 
-  @spec columns(db(), statement()) :: {:ok, [binary()]} | {:error, reason()}
-  def columns(conn, statement), do: Sqlite3NIF.columns(conn, statement)
+  @spec columns(db(), statement()) :: {:ok, [binary()]} | {:error, Error.t()}
+  def columns(conn, statement), do: wrap_err(Sqlite3NIF.columns(conn, statement))
 
-  @spec step(db(), statement()) :: :done | :busy | {:row, row()} | {:error, reason()}
-  def step(conn, statement), do: Sqlite3NIF.step(conn, statement)
+  @spec step(db(), statement()) :: :done | :busy | {:row, row()} | {:error, Error.t()}
+  def step(conn, statement), do: wrap_err(Sqlite3NIF.step(conn, statement))
 
   @spec multi_step(db(), statement()) ::
-          :busy | {:rows, [row()]} | {:done, [row()]} | {:error, reason()}
+          :busy | {:rows, [row()]} | {:done, [row()]} | {:error, Error.t()}
   def multi_step(conn, statement) do
     chunk_size = Application.get_env(:exqlite, :default_chunk_size, 50)
     multi_step(conn, statement, chunk_size)
   end
 
   @spec multi_step(db(), statement(), integer()) ::
-          :busy | {:rows, [row()]} | {:done, [row()]} | {:error, reason()}
+          :busy | {:rows, [row()]} | {:done, [row()]} | {:error, Error.t()}
   def multi_step(conn, statement, chunk_size) do
     case Sqlite3NIF.multi_step(conn, statement, chunk_size) do
       :busy ->
         :busy
 
       {:error, reason} ->
-        {:error, reason}
+        wrap_err({:error, reason})
 
       {:rows, rows} ->
         {:rows, Enum.reverse(rows)}
@@ -159,16 +159,16 @@ defmodule Exqlite.Sqlite3 do
   Causes the database connection to free as much memory as it can. This is
   useful if you are on a memory restricted system.
   """
-  @spec shrink_memory(db()) :: :ok | {:error, reason()}
+  @spec shrink_memory(db()) :: :ok | {:error, Error.t()}
   def shrink_memory(conn) do
-    Sqlite3NIF.execute(conn, "PRAGMA shrink_memory")
+    wrap_err(Sqlite3NIF.execute(conn, "PRAGMA shrink_memory"))
   end
 
-  @spec fetch_all(db(), statement(), integer()) :: {:ok, [row()]} | {:error, reason()}
+  @spec fetch_all(db(), statement(), integer()) :: {:ok, [row()]} | {:error, Error.t()}
   def fetch_all(conn, statement, chunk_size) do
     {:ok, try_fetch_all(conn, statement, chunk_size)}
   catch
-    :throw, {:error, _reason} = error -> error
+    :throw, {:error, _reason} = error -> wrap_err(error)
   end
 
   defp try_fetch_all(conn, statement, chunk_size) do
@@ -180,7 +180,7 @@ defmodule Exqlite.Sqlite3 do
     end
   end
 
-  @spec fetch_all(db(), statement()) :: {:ok, [row()]} | {:error, reason()}
+  @spec fetch_all(db(), statement()) :: {:ok, [row()]} | {:error, Error.t()}
   def fetch_all(conn, statement) do
     # Should this be done in the NIF? It can be _much_ faster to build a list
     # there, but at the expense that it could block other dirty nifs from
@@ -194,18 +194,18 @@ defmodule Exqlite.Sqlite3 do
   @doc """
   Serialize the contents of the database to a binary.
   """
-  @spec serialize(db(), String.t()) :: {:ok, binary()} | {:error, reason()}
+  @spec serialize(db(), String.t()) :: {:ok, binary()} | {:error, Error.t()}
   def serialize(conn, database \\ "main") do
-    Sqlite3NIF.serialize(conn, database)
+    wrap_err(Sqlite3NIF.serialize(conn, database))
   end
 
   @doc """
   Disconnect from database and then reopen as an in-memory database based on
   the serialized binary.
   """
-  @spec deserialize(db(), String.t(), binary()) :: :ok | {:error, reason()}
+  @spec deserialize(db(), String.t(), binary()) :: :ok | {:error, Error.t()}
   def deserialize(conn, database \\ "main", serialized) do
-    Sqlite3NIF.deserialize(conn, database, serialized)
+    wrap_err(Sqlite3NIF.deserialize(conn, database, serialized))
   end
 
   def release(_conn, nil), do: :ok
@@ -221,21 +221,24 @@ defmodule Exqlite.Sqlite3 do
 
   If you are operating on limited memory capacity systems, definitely call this.
   """
-  @spec release(db(), statement()) :: :ok | {:error, reason()}
+  @spec release(db(), statement()) :: :ok | {:error, Error.t()}
   def release(conn, statement) do
-    Sqlite3NIF.release(conn, statement)
+    wrap_err(Sqlite3NIF.release(conn, statement))
   end
 
   @doc """
   Allow loading native extensions.
   """
-  @spec enable_load_extension(db(), boolean()) :: :ok | {:error, reason()}
+  @spec enable_load_extension(db(), boolean()) :: :ok | {:error, Error.t()}
   def enable_load_extension(conn, flag) do
-    if flag do
-      Sqlite3NIF.enable_load_extension(conn, 1)
-    else
-      Sqlite3NIF.enable_load_extension(conn, 0)
-    end
+    result =
+      if flag do
+        Sqlite3NIF.enable_load_extension(conn, 1)
+      else
+        Sqlite3NIF.enable_load_extension(conn, 0)
+      end
+
+    wrap_err(result)
   end
 
   @doc """
@@ -263,9 +266,9 @@ defmodule Exqlite.Sqlite3 do
       hook set for connection A will not receive the update, but the hook for
       connection B will receive the update.
   """
-  @spec set_update_hook(db(), pid()) :: :ok | {:error, reason()}
+  @spec set_update_hook(db(), pid()) :: :ok | {:error, Error.t()}
   def set_update_hook(conn, pid) do
-    Sqlite3NIF.set_update_hook(conn, pid)
+    wrap_err(Sqlite3NIF.set_update_hook(conn, pid))
   end
 
   @doc """
@@ -287,9 +290,9 @@ defmodule Exqlite.Sqlite3 do
       If this function is called multiple times, only the last pid will
       receive the notifications
   """
-  @spec set_log_hook(pid()) :: :ok | {:error, reason()}
+  @spec set_log_hook(pid()) :: :ok | {:error, Error.t()}
   def set_log_hook(pid) do
-    Sqlite3NIF.set_log_hook(pid)
+    wrap_err(Sqlite3NIF.set_log_hook(pid))
   end
 
   defp convert(%Date{} = val), do: Date.to_iso8601(val)
@@ -302,4 +305,15 @@ defmodule Exqlite.Sqlite3 do
   end
 
   defp convert(val), do: val
+
+  defp wrap_err({:error, usage_error}) when is_atom(usage_error) do
+    raise ArgumentError, usage_error
+  end
+
+  defp wrap_err({:error, sqlite_error_info}) when is_map(sqlite_error_info) do
+    %{errcode: errcode, errstr: errstr, errmsg: errmsg} = sqlite_error_info
+    {:error, %Exqlite.Error{code: errcode, reason: errstr, message: errmsg}}
+  end
+
+  defp wrap_err(success), do: success
 end

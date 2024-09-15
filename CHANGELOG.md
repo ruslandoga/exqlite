@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- added: add `code` and `reason` fields in `Exqlite.Error`
+
 ## v0.24.1
 
 - fixed: Pre-compile images for Apple and Windows

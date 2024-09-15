@@ -1,11 +1,13 @@
 defmodule Exqlite.Error do
   @moduledoc """
-  The error emitted from SQLite or a general error with the library.
+  The error emitted from SQLite.
   """
 
-  defexception [:message, :statement]
+  defexception [:code, :reason, :message, :statement]
 
   @type t :: %__MODULE__{
+          code: integer,
+          reason: atom,
           message: String.t(),
           statement: String.t()
         }

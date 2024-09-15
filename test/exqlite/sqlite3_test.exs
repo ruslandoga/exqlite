@@ -49,7 +49,8 @@ defmodule Exqlite.Sqlite3Test do
       assert [1, "This is a test"] == columns
 
       # Readonly connection cannot insert
-      assert {:error, "attempt to write a readonly database"} ==
+      assert {:error,
+              %Exqlite.Error{code: 8, message: "attempt to write a readonly database"}} =
                Sqlite3.execute(ro_conn, insert_value_query)
     end
 
@@ -203,7 +204,13 @@ defmodule Exqlite.Sqlite3Test do
 
     test "supports utf8 in error messages" do
       {:ok, conn} = Sqlite3.open(":memory:")
-      assert {:error, "no such table: 🌍"} = Sqlite3.prepare(conn, "select * from 🌍")
+
+      assert {:error,
+              %Exqlite.Error{
+                code: 1,
+                reason: "SQL logic error",
+                message: "no such table: 🌍"
+              }} = Sqlite3.prepare(conn, "select * from 🌍")
     end
   end
 
@@ -434,10 +441,16 @@ defmodule Exqlite.Sqlite3Test do
       :ok = Sqlite3.close(conn)
       :ok = Sqlite3.bind(conn, statement, ["this is a test"])
 
-      {:error, message} =
-        Sqlite3.execute(conn, "create table test (id integer primary key, stuff text)")
-
-      assert message == "Sqlite3 was invoked incorrectly."
+      assert {:error,
+              %Exqlite.Error{
+                code: 21,
+                reason: "bad parameter or other API misuse",
+                message: "out of memory"
+              }} =
+               Sqlite3.execute(
+                 conn,
+                 "create table test (id integer primary key, stuff text)"
+               )
 
       assert :done == Sqlite3.step(conn, statement)
     end
@@ -545,8 +558,12 @@ defmodule Exqlite.Sqlite3Test do
     test "can receive errors", %{conn: conn} do
       assert :ok = Sqlite3.set_log_hook(self())
 
-      assert {:error, reason} = Sqlite3.prepare(conn, "some invalid sql")
-      assert reason == "near \"some\": syntax error"
+      assert {:error,
+              %Exqlite.Error{
+                code: 1,
+                reason: "SQL logic error",
+                message: "near \"some\": syntax error"
+              }} = Sqlite3.prepare(conn, "some invalid sql")
 
       assert_receive {:log, rc, msg}
       assert rc == 1
@@ -560,8 +577,15 @@ defmodule Exqlite.Sqlite3Test do
       task =
         Task.async(fn ->
           :ok = Sqlite3.set_log_hook(self())
-          assert {:error, reason} = Sqlite3.prepare(conn, "some invalid sql")
-          assert reason == "near \"some\": syntax error"
+
+          assert {:error,
+                  %Exqlite.Error{
+                    code: 1,
+                    reason: "SQL logic error",
+                    message: "near \"some\": syntax error"
+                  }} =
+                   Sqlite3.prepare(conn, "some invalid sql")
+
           assert_receive {:log, rc, msg}
           assert rc == 1
           assert msg == "near \"some\": syntax error in \"some invalid sql\""

@@ -109,20 +109,6 @@ exqlite_mem_shutdown(void* ptr)
 {
 }
 
-static const char*
-get_sqlite3_error_msg(int rc, sqlite3* db)
-{
-    if (rc == SQLITE_MISUSE) {
-        return "Sqlite3 was invoked incorrectly.";
-    }
-
-    const char* message = sqlite3_errmsg(db);
-    if (!message) {
-        return "No error message available.";
-    }
-    return message;
-}
-
 static ERL_NIF_TERM
 make_atom(ErlNifEnv* env, const char* atom_name)
 {
@@ -153,6 +139,7 @@ make_error_tuple(ErlNifEnv* env, const char* reason)
     assert(env);
     assert(reason);
 
+    // TODO
     return enif_make_tuple2(env, make_atom(env, "error"), make_atom(env, reason));
 }
 
@@ -174,15 +161,18 @@ make_binary(ErlNifEnv* env, const void* bytes, unsigned int size)
 }
 
 static ERL_NIF_TERM
-make_sqlite3_error_tuple(ErlNifEnv* env, int rc, sqlite3* db)
+make_sqlite3_error_tuple(ErlNifEnv* env, int rc, connection_t* conn)
 {
-    const char* msg = get_sqlite3_error_msg(rc, db);
-    size_t len      = strlen(msg);
+    enif_mutex_lock(conn->mutex);
+    const char* errmsg = sqlite3_errmsg(conn->db);
+    const char* errstr = sqlite3_errstr(rc);
+    enif_mutex_unlock(conn->mutex);
 
-    return enif_make_tuple2(
-      env,
-      make_atom(env, "error"),
-      make_binary(env, msg, len));
+    ERL_NIF_TERM errinfo = enif_make_new_map(env);
+    enif_make_map_put(env, errinfo, make_atom(env, "errcode"), enif_make_int(env, rc), &errinfo);
+    enif_make_map_put(env, errinfo, make_atom(env, "errstr"), make_binary(env, errstr, strlen(errstr)), &errinfo);
+    enif_make_map_put(env, errinfo, make_atom(env, "errmsg"), make_binary(env, errmsg, strlen(errmsg)), &errinfo);
+    return enif_make_tuple2(env, make_atom(env, "error"), errinfo);
 }
 
 static ERL_NIF_TERM
@@ -266,7 +256,7 @@ exqlite_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     if (autocommit == 0) {
         rc = sqlite3_exec(conn->db, "ROLLBACK;", NULL, NULL, NULL);
         if (rc != SQLITE_OK) {
-            return make_sqlite3_error_tuple(env, rc, conn->db);
+            return make_sqlite3_error_tuple(env, rc, conn);
         }
     }
 
@@ -283,7 +273,7 @@ exqlite_close(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     rc = sqlite3_close_v2(conn->db);
     if (rc != SQLITE_OK) {
         enif_mutex_unlock(conn->mutex);
-        return make_sqlite3_error_tuple(env, rc, conn->db);
+        return make_sqlite3_error_tuple(env, rc, conn);
     }
 
     conn->db = NULL;
@@ -319,7 +309,7 @@ exqlite_execute(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 
     rc = sqlite3_exec(conn->db, (char*)bin.data, NULL, NULL, NULL);
     if (rc != SQLITE_OK) {
-        return make_sqlite3_error_tuple(env, rc, conn->db);
+        return make_sqlite3_error_tuple(env, rc, conn);
     }
 
     return make_atom(env, "ok");
@@ -399,7 +389,7 @@ exqlite_prepare(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 
     if (rc != SQLITE_OK) {
         enif_release_resource(statement);
-        return make_sqlite3_error_tuple(env, rc, conn->db);
+        return make_sqlite3_error_tuple(env, rc, conn);
     }
 
     result = enif_make_resource(env, statement);
@@ -514,7 +504,7 @@ exqlite_bind(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         }
 
         if (rc != SQLITE_OK) {
-            return make_sqlite3_error_tuple(env, rc, conn->db);
+            return make_sqlite3_error_tuple(env, rc, conn);
         }
 
         list = tail;
@@ -632,7 +622,7 @@ exqlite_multi_step(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
 
             default:
                 sqlite3_reset(statement->statement);
-                return make_sqlite3_error_tuple(env, rc, conn->db);
+                return make_sqlite3_error_tuple(env, rc, conn);
         }
     }
 
@@ -671,7 +661,7 @@ exqlite_step(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
         case SQLITE_DONE:
             return make_atom(env, "done");
         default:
-            return make_sqlite3_error_tuple(env, rc, conn->db);
+            return make_sqlite3_error_tuple(env, rc, conn);
     }
 }
 
@@ -847,7 +837,7 @@ exqlite_deserialize(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[])
     memcpy(buffer, serialized.data, size);
     rc = sqlite3_deserialize(conn->db, "main", buffer, size, size, flags);
     if (rc != SQLITE_OK) {
-        return make_sqlite3_error_tuple(env, rc, conn->db);
+        return make_sqlite3_error_tuple(env, rc, conn);
     }
 
     return make_atom(env, "ok");
@@ -1002,7 +992,7 @@ exqlite_enable_load_extension(ErlNifEnv* env, int argc, const ERL_NIF_TERM argv[
 
     rc = sqlite3_enable_load_extension(conn->db, enable_load_extension_value);
     if (rc != SQLITE_OK) {
-        return make_sqlite3_error_tuple(env, rc, conn->db);
+        return make_sqlite3_error_tuple(env, rc, conn);
     }
     return make_atom(env, "ok");
 }

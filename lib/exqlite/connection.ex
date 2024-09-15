@@ -693,8 +693,8 @@ defmodule Exqlite.Connection do
 
       {:ok, result, %{state | transaction_status: transaction_status}}
     else
-      {:error, reason} ->
-        {:disconnect, %Error{message: to_string(reason), statement: statement}, state}
+      {:error, error} ->
+        {:disconnect, %Error{error | statement: statement}, state}
     end
   end
 

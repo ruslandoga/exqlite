@@ -29,8 +29,8 @@ defmodule Exqlite.Basic do
       {:ok, %Query{}, %Result{rows: rows, columns: columns}, %Connection{}} ->
         {:ok, rows, columns}
 
-      {:error, %Error{message: message}, %Connection{}} ->
-        {:error, to_string(message)}
+      {:error, %Error{} = error, %Connection{}} ->
+        {:error, Exception.message(error)}
     end
   end
 
