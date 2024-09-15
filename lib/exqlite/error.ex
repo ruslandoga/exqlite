@@ -1,6 +1,6 @@
 defmodule Exqlite.Error do
   @moduledoc """
-  The error emitted from SQLite or a general error with the library.
+  The error emitted from SQLite.
   """
 
   defexception [:code, :reason, :message, :statement]

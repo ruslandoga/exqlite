@@ -80,7 +80,7 @@ defmodule Exqlite.ConnectionTest do
                |> Connection.handle_execute([], [], conn)
              )
 
-      {:error, %{message: message}, _} =
+      {:error, %Exqlite.Error{code: code, message: message}, _} =
         %Query{
           statement: "insert into test (id, stuff) values (888, 'some more stuff')"
         }
@@ -88,6 +88,7 @@ defmodule Exqlite.ConnectionTest do
 
       # In most of the test matrix the message is "attempt to write a readonly database",
       # but in Elixir 1.13, OTP 23, OS windows-2019 it is "not an error".
+      assert code in [8, 1]
       assert message in ["attempt to write a readonly database", "not an error"]
 
       File.rm(path)
@@ -168,7 +169,8 @@ defmodule Exqlite.ConnectionTest do
       assert [1, "This is a test"] == columns
 
       # Readonly connection cannot insert
-      assert {:error, "attempt to write a readonly database"} ==
+      assert {:error,
+              %Exqlite.Error{code: 8, message: "attempt to write a readonly database"}} =
                Sqlite3.execute(ro_state.db, insert_value_query)
     end
   end
